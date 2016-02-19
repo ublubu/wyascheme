@@ -5,20 +5,30 @@ module Eval where
 
 import Control.Monad.Except
 import Data.Either.Combinators
-import Types
 
-eval :: (MonadError LispError m) => LispVal -> m LispVal
-eval val@(String _) = return val
-eval val@(Number _) = return val
-eval val@(Bool _) = return val
-eval (List [Atom "quote", val]) = return val
-eval (List [Atom "if", test, true, false]) = do
-  result <- eval test
-  case result of Bool False -> eval false
-                 Bool True -> eval true
+import Types
+import Env
+
+eval :: (MonadError LispError m, MonadIO m)
+     => Env
+     -> LispVal
+     -> m LispVal
+eval _ val@(String _) = return val
+eval _ val@(Number _) = return val
+eval _ val@(Bool _) = return val
+eval env (Atom var) = getVar env var
+eval _ (List [Atom "quote", val]) = return val
+eval env (List [Atom "if", test, true, false]) = do
+  result <- eval env test
+  case result of Bool False -> eval env false
+                 Bool True -> eval env true
                  _ -> throwError $ TypeMismatch "bool" result
-eval (List (Atom func : args)) = apply func =<< mapM eval args
-eval badForm = throwError $ BadSpecialForm "unrecognized special form" badForm
+eval env (List [Atom "set!", Atom var, form]) =
+  setVar env var =<< eval env form
+eval env (List [Atom "define", Atom var, form]) =
+  defineVar env var =<< eval env form
+eval env (List (Atom func : args)) = apply func =<< mapM (eval env) args
+eval _ badForm = throwError $ BadSpecialForm "unrecognized special form" badForm
 
 apply :: (MonadError LispError m) => String -> [LispVal] -> m LispVal
 apply func args =

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+
 module Main where
 
 import Control.Monad.Except
@@ -8,6 +9,7 @@ import Text.ParserCombinators.Parsec (parse)
 
 import Types
 import Parse
+import Env
 import Eval
 
 flushStr :: String -> IO ()
@@ -21,24 +23,24 @@ readExpr input = case parse parseExpr "lisp" input of
   Left err -> throwError . Parser $ err
   Right val -> return val
 
-evalString :: String -> Either LispError LispVal
-evalString = runExcept . (eval <=< readExpr)
+evalString :: Env -> String -> IO (Either LispError LispVal)
+evalString env = runExceptT . (eval env <=< readExpr)
 
-evalToString :: String -> String
-evalToString = uneither . mapBoth show show . evalString
+evalToString :: Env -> String -> IO String
+evalToString env = fmap (uneither . mapBoth show show) . evalString env
 
 uneither :: Either a a -> a
 uneither (Left x) = x
 uneither (Right x) = x
 
-evalAndPrint :: String -> IO ()
-evalAndPrint = putStrLn . evalToString
+evalAndPrint :: Env -> String -> IO ()
+evalAndPrint env = putStrLn <=< evalToString env
 
-repl :: IO ()
-repl = do
+repl :: Env -> IO ()
+repl env = do
   expr <- readPrompt "Lisp>>> "
   case expr of "quit" -> return ()
-               _ -> evalAndPrint expr >> repl
+               _ -> evalAndPrint env expr >> repl env
 
 main :: IO ()
-main = repl
+main = repl =<< nullEnv
