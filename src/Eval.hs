@@ -1,10 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Eval where
 
+import Control.Lens ((%~), each, _2, (&))
 import Control.Monad.Except
 import Data.Either.Combinators
+import Data.Maybe
 
 import Types
 import Env
@@ -27,14 +30,53 @@ eval env (List [Atom "set!", Atom var, form]) =
   setVar env var =<< eval env form
 eval env (List [Atom "define", Atom var, form]) =
   defineVar env var =<< eval env form
-eval env (List (Atom func : args)) = apply func =<< mapM (eval env) args
+eval env (List (Atom "define" : List (Atom var : params) : body)) =
+  defineVar env var Func { _funcParams = fmap showVal params
+                         , _funcVararg = Nothing
+                         , _funcBody = body
+                         , _funcClosure = env }
+eval env (List (Atom "define" : DottedList (Atom var : params) vararg : body)) =
+  defineVar env var Func { _funcParams = fmap showVal params
+                         , _funcVararg = Just . showVal $ vararg
+                         , _funcBody = body
+                         , _funcClosure = env }
+eval env (List (Atom "lambda" : List params : body)) =
+  return Func { _funcParams = fmap showVal params
+              , _funcVararg = Nothing
+              , _funcBody = body
+              , _funcClosure = env }
+eval env (List (Atom "lambda" : DottedList params vararg : body)) =
+  return Func { _funcParams = fmap showVal params
+              , _funcVararg = Just . showVal $ vararg
+              , _funcBody = body
+              , _funcClosure = env }
+eval env (List (Atom "lambda" : vararg@(Atom _) : body)) =
+  return Func { _funcParams = []
+              , _funcVararg = Just . showVal $ vararg
+              , _funcBody = body
+              , _funcClosure = env }
+eval env (List (function : args)) = do
+  func <- eval env function
+  argVals <- mapM (eval env) args
+  apply func argVals
 eval _ badForm = throwError $ BadSpecialForm "unrecognized special form" badForm
 
-apply :: (MonadError LispError m) => String -> [LispVal] -> m LispVal
-apply func args =
-  maybe
-  (throwError $ NotFunction "Unrecognized primitive function" func)
-  ($ args) $ lookup func primitives
+apply :: (MonadError LispError m, MonadIO m) => LispVal -> [LispVal] -> m LispVal
+apply (PrimitiveFunc func) args = liftEither $ func args
+apply Func{..} args
+  | isNothing _funcVararg && paramCount /= length args =
+      throwError $ NumArgs (toInteger paramCount) args
+  | otherwise = do
+      env' <- bindVars _funcClosure (zip _funcParams args)
+      env'' <- maybe (return env') (bindVarargs env') _funcVararg
+      last <$> mapM (eval env'') _funcBody
+  where paramCount = length _funcParams
+        varargs = drop (length _funcParams) args
+        bindVarargs env vararg = bindVars env [(vararg, List varargs)]
+
+primitiveBindings :: (MonadIO m) => m Env
+primitiveBindings =
+  flip bindVars (primitives & each._2 %~ PrimitiveFunc) =<< nullEnv
 
 primitives :: (MonadError LispError m) => [(String, [LispVal] -> m LispVal)]
 primitives = [ ("+", nnn (+))

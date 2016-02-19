@@ -1,6 +1,12 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Types where
 
+import Control.Monad.Except
 import Text.ParserCombinators.Parsec (ParseError)
+import Data.IORef
+
+type Env = IORef [(String, IORef LispVal)]
 
 data LispVal = Atom String
              | List [LispVal]
@@ -8,6 +14,12 @@ data LispVal = Atom String
              | Number Integer
              | String String
              | Bool Bool
+             | PrimitiveFunc ([LispVal] -> Either LispError LispVal)
+             | Func { _funcParams :: [String]
+                    , _funcVararg :: Maybe String
+                    , _funcBody :: [LispVal]
+                    , _funcClosure :: Env
+                    }
 
 showVal :: LispVal -> String
 showVal (String contents) = "\"" ++ contents ++ "\""
@@ -17,6 +29,10 @@ showVal (Bool True) = "#t"
 showVal (Bool False) = "#f"
 showVal (List contents) = "(" ++ unwordsList contents ++ ")"
 showVal (DottedList init' last') = "(" ++ unwordsList init' ++ " . " ++ showVal last' ++ ")"
+showVal (PrimitiveFunc _) = "<primitive>"
+showVal Func{..} =
+  "(lambda (" ++ unwords (map show _funcParams) ++
+  maybe "" (\arg -> " . " ++ arg) _funcVararg ++ ") ...)"
 
 instance Show LispVal where show = showVal
 
@@ -41,3 +57,7 @@ instance Show LispError where show = showError
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . fmap showVal
+
+liftEither :: (MonadError e m) => Either e a -> m a
+liftEither (Right x) = return x
+liftEither (Left x) = throwError x

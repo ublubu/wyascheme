@@ -43,4 +43,4 @@ repl env = do
                _ -> evalAndPrint env expr >> repl env
 
 main :: IO ()
-main = repl =<< nullEnv
+main = repl =<< primitiveBindings
