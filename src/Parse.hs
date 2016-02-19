@@ -1,6 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Parse where
 
-import Control.Monad
+import Control.Monad.Except
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Types
 
@@ -55,3 +57,14 @@ parseExpr =
          x <- try parseList <|> parseDottedList
          void $ char ')'
          return x
+
+readExpr :: (MonadError LispError m) => String -> m LispVal
+readExpr = tryRead parseExpr
+
+readExprs :: (MonadError LispError m) => String -> m [LispVal]
+readExprs = tryRead (endBy parseExpr spaces)
+
+tryRead :: (MonadError LispError m) => Parser a -> String -> m a
+tryRead parser input = case parse parser "lisp" input of
+  Left err -> throwError . Parser $ err
+  Right val -> return val
